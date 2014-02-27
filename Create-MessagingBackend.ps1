@@ -1,11 +1,3 @@
-<# 
-.SYNOPSIS 
-
-.DESCRIPTION  
-
-.EXAMPLE 
-
-#> 
 param (
     [Parameter(Mandatory = $true)] [String] $DCLocation,
     [Parameter(Mandatory = $true)] [String] $WebSiteName,

@@ -1,12 +1,3 @@
-
-<# 
-.SYNOPSIS 
-
-.DESCRIPTION  
-
-.EXAMPLE 
-
-#> 
 param (
     [Parameter(Mandatory = $true)] [String] $ComponentName,
     [Parameter(Mandatory = $true)] [String] $GitUserName,

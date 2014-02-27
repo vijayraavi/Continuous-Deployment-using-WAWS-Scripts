@@ -1,4 +1,3 @@
-
 param (
 	[Parameter(Mandatory = $true)] [String] $AzureSubscription,
     [Parameter(Mandatory = $true)] [String] $DCLocation,
