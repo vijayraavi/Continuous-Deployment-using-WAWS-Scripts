@@ -1,6 +1,6 @@
 param (
 	[Parameter(Mandatory = $true)] [String] $AzureSubscription,
-    [Parameter(Mandatory = $true)] [String] $WebSite
+    [Parameter(Mandatory = $true)] [String] $WebSiteName
 )
 
 if ((Test-Path "azure.err") -eq $True) {
@@ -20,13 +20,13 @@ try{
 	Write-Host "set subscription for CLI"
 	azure account set $AzureSubscription
 
-	Write-Host "retrieve production settings for $WebSite"
-	$productionWebSite = Get-AzureWebsite -Name $WebSite -slot production
-	Write-Host "retrieve staging settings for $WebSite"
-	$stagingWebSite = Get-AzureWebsite -Name $WebSite -slot staging
+	Write-Host "retrieve production settings for $WebSiteName"
+	$productionWebSite = Get-AzureWebsite -Name $WebSiteName -slot production
+	Write-Host "retrieve staging settings for $WebSiteName"
+	$stagingWebSite = Get-AzureWebsite -Name $WebSiteName -slot staging
 
 	Write-Host "set production settings for staging slot"
-	Set-AzureWebsite -Name $WebSite -slot staging -AppSettings $productionWebSite.AppSettings`
+	Set-AzureWebsite -Name $WebSiteName -slot staging -AppSettings $productionWebSite.AppSettings`
 		-ConnectionStrings $productionWebSite.ConnectionStrings`
 		-DefaultDocuments $productionWebSite.DefaultDocuments`
 		-DetailedErrorLoggingEnabled $productionWebSite.DetailedErrorLoggingEnabled`
@@ -34,11 +34,11 @@ try{
 		-HttpLoggingEnabled $productionWebSite.HttpLoggingEnabled`
 		-RequestTracingEnabled $productionWebSite.RequestTracingEnabled
 
-	Write-Host "swap $WebSite"
-	azure site swap --quiet $WebSite
+	Write-Host "swap $WebSiteName"
+	azure site swap --quiet $WebSiteName
 	
-	Write-Host "set staging settings for $WebSite"
-	Set-AzureWebsite -Name $WebSite -slot staging -AppSettings $stagingWebSite.AppSettings`
+	Write-Host "set staging settings for $WebSiteName"
+	Set-AzureWebsite -Name $WebSiteName -slot staging -AppSettings $stagingWebSite.AppSettings`
 		-ConnectionStrings $stagingWebSite.ConnectionStrings`
 		-DefaultDocuments $stagingWebSite.DefaultDocuments`
 		-DetailedErrorLoggingEnabled $stagingWebSite.DetailedErrorLoggingEnabled`

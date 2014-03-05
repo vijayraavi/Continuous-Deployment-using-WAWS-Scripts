@@ -1,13 +1,15 @@
 param (
 	[Parameter(Mandatory = $true)] [String] $AzureSubscription,
     [Parameter(Mandatory = $true)] [String] $DCLocation,
-    [Parameter(Mandatory = $true)] [String] $ReleaseName,
-    [Parameter(Mandatory = $true)] [String] $ClientIP
+    [Parameter(Mandatory = $true)] [String] $FrontendReleaseName,
+    [Parameter(Mandatory = $true)] [String] $BackendReleaseName,
+    [Parameter(Mandatory = $true)] [Boolean] $DeleteExistingWebSites,
+    [Parameter(Mandatory = $true)] [Boolean] $CreateNewDatabase
 )
 
 $config = @{
-	frontendName = "MsgSolCB-Frontend-$ReleaseName";
-	backendName = "MsgSolCB-Backend-$ReleaseName"
+	frontendName = "MsgSolCB-Frontend-$FrontendReleaseName";
+	backendName = "MsgSolCB-Backend-$BackendReleaseName"
 }
 
 if ((Test-Path "azure.err") -eq $True) {
@@ -58,9 +60,9 @@ try{
 	}
 
 	Write-Host "create and configure backend "$config.backendName
-	$backendURLs = .\Create-MessagingBackend $DCLocation $config.backendName $ClientIP
+	$backendURLs = .\Create-MessagingBackend $DCLocation $config.backendName $DeleteExistingWebSites $CreateNewDatabase
 	Write-Host "create and configure frontend "$config.frontendName
-	.\Create-MessagingFrontend $DCLocation $config.frontendName [string]$backendURLs_.Url [string]$backendURLs_.StagingUrl
+	.\Create-MessagingFrontend $DCLocation $config.frontendName $backendURLs.Url $backendURLs.StagingUrl $DeleteExistingWebSites
 
 	if ((Test-Path "azure.err") -eq $True) {
 		Write-Host "`n`nCLI ERRORS - check azure.err for details on errors`n"

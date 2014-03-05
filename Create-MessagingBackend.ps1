@@ -1,7 +1,8 @@
 param (
     [Parameter(Mandatory = $true)] [String] $DCLocation,
     [Parameter(Mandatory = $true)] [String] $WebSiteName,
-    [Parameter(Mandatory = $true)] [String] $ClientIP
+    [Parameter(Mandatory = $true)] [Boolean] $DeleteExistingWebSite,
+    [Parameter(Mandatory = $true)] [Boolean] $CreateNewDatabase
 )
 
 $config = @{
@@ -26,12 +27,41 @@ function Create-StorageAccount {
 
     $StorageAccount = Get-AzureStorageAccount | Where-Object {$_.StorageAccountName -eq $storageAccountName } 
     if ($storageAccount -eq $null) {
-        Write-Host "create staging storage account $storageAccountName in $DCLocation"
-        azure storage account create --label $storageAccountName --location `"$DCLocation`" $storageAccountName
+        Write-Host "create storage account $storageAccountName in $DCLocation"
+        New-AzureStorageAccount -StorageAccountName $storageAccountName -Label $storageAccountName -Location $DCLocation
     }
     else {
         Write-Host "storage $storageAccountName already exists"
     }      
+}
+function Get-BackendDatabase {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)] [String] $AppDatabaseName 
+    )    
+    $dbServerName = $null
+    if ($CreateNewDatabase -eq $true){
+        $dbServerName = Create-BackendDatabase $AppDatabaseName
+    }
+    else {
+        Get-AzureSqlDatabaseServer | ForEach-Object {
+            $dbServer =$_
+            if ($dbServer.Location -eq $DCLocation) {
+                if ((Get-AzureSqlDatabase $dbServer.ServerName | Where-Object {$_.Name -eq $AppDatabaseName }) -ne $null) {
+                    Write-Host "Using SQLDatabaseServer " $dbServer.ServerName " for database $AppDatabaseName" 
+                    $dbServerName = $dbServer.ServerName
+                }
+            }
+        }
+        if ($dbServerName -eq $null){
+            throw "Couldn't find a SQLDatabaseServer that contains database $AppDatabaseName"
+        }
+    }
+    # Create connection string for database 
+    $appDBConnStr  = "Server=tcp:$dbServerName.database.windows.net,1433;Database=$AppDatabaseName;"  
+    $appDBConnStr += "User ID=" + $config.dbUsername + "@$dbServerName;Password=" + $config.dbPassword + ";Trusted_Connection=False;Encrypt=True;Connection Timeout=30;" 
+    
+    return $appDBConnStr
 }
 
 function Create-BackendDatabase {
@@ -40,14 +70,9 @@ function Create-BackendDatabase {
         [Parameter(Mandatory = $true)] [String] $AppDatabaseName 
     )
 
-    $dbServerName = .\Create-SQLDatabase $DCLocation $AppDatabaseName $ClientIP $config.dbUsername $config.dbPassword
-
-    Write-Host "Database $AppDatabaseName has been created on server $dbServerName"
-    # Create connection string for database 
-    $appDBConnStr  = "Server=tcp:$dbServerName.database.windows.net,1433;Database=$AppDatabaseName;"  
-    $appDBConnStr += "User ID=" + $config.dbUsername + "@$dbServerName;Password=" + $config.dbPassword + ";Trusted_Connection=False;Encrypt=True;Connection Timeout=30;" 
-
-    return $appDBConnStr
+    $DbServerName = .\Create-SQLDatabase $DCLocation $AppDatabaseName $config.dbUsername $config.dbPassword
+    Write-Host "Database $AppDatabaseName has been created on server $DbServerName"
+    return $DbServerName
 }
 
 function Configure-MessagingBackend {
@@ -58,19 +83,6 @@ function Configure-MessagingBackend {
         [Parameter(Mandatory = $true)] [String] $DBConnStrValue
     )
 
-
-
-    $cliSlotOption =$null
-    $slotName =$null
-    if ($IsStaging -eq $true) {
-        $cliSlotOption = "--slot"
-        $slotName = "staging"
-    }
-
-    Write-Host "configuring $WebSiteName"
-    azure site scale instances --instances 2 --size small $cliSlotOption $slotName $WebSiteName
-
-    Write-Host "configuring application settings for $WebSiteName"
     $storageAccountKey = Get-AzureStorageKey $StorageAccountName
     $storageKey = $storageAccountKey.Primary
     $storageConnectionString = "DefaultEndpointsProtocol=https;AccountName=$StorageAccountName;AccountKey=$storageKey"
@@ -78,16 +90,20 @@ function Configure-MessagingBackend {
     $appSettings = @{
         "MessagesStorage" = "$storageConnectionString"
     } 
+    $connectionStringInfo = @{
+        Name = "BackendDb"; Type = "SQLAzure"; ConnectionString = $dbConnStrValue
+    }
 
     if ($IsStaging -eq $true) {
-        Set-AzureWebsite -Name $WebSiteName -slot $slotName -AppSettings $appSettings
+        Set-AzureWebsite -Name $WebSiteName -slot staging -AppSettings $appSettings -ConnectionStrings $connectionStringInfo 
+        Write-Host "configuring staging slot for $WebSiteName"
+        azure site scale instances --instances 1 --size small --slot staging $WebSiteName
     }
     else {
-        Set-AzureWebsite -Name $WebSiteName -AppSettings $appSettings
+        Set-AzureWebsite -Name $WebSiteName -AppSettings $appSettings -ConnectionStrings $connectionStringInfo
+        Write-Host "configuring production slot for $WebSiteName"
+        azure site scale instances --instances 1 --size small $WebSiteName
     }
-
-    Write-Host "configuring connection strings for $WebSiteName"
-    azure site connectionstring add "BackendDb" $dbConnStrValue "SQLAzure" $cliSlotOption $slotName $WebSiteName
 }
 
 
@@ -95,20 +111,27 @@ function Configure-MessagingBackend {
 Create-StorageAccount $config.storageAccountName
 Create-StorageAccount $config.stagingStorageAccountName
 
-$dbConStrValue = Create-BackendDatabase $config.databaseName
-$stagingDBConStrValue = Create-BackendDatabase $config.stagingDatabaseName
+$dbConStrValue = Get-BackendDatabase $config.databaseName
+$stagingDBConStrValue = Get-BackendDatabase $config.stagingDatabaseName
 
 if ((Get-AzureWebsite | Where-Object {$_.Name -eq $WebSiteName }) -ne $null) {
-    Write-Host "Web Site $WebSiteName already exists and will be deleted"
-    azure site delete -q $WebSiteName
+    if ($DeleteExistingWebSite -eq $true) {
+        Write-Host "Web Site $WebSiteName already exists and will be deleted"
+        Remove-AzureWebsite -Name $WebSiteName -Force
+    }
+    else {
+        Write-Host "Web Site $WebSiteName already exists and will be re-configured"
+    }
 }
+
 # we create the staging site before configure the site 
 # this avoids that the prod settings are copied to the staging site
 Write-Host "create website $WebSiteName"
-azure site create --location "$DCLocation" --git $WebSiteName
+New-AzureWebSite -Name $WebSiteName -git -Location $DCLocation
 Write-Host "set scale mode to standard for $WebSiteName"
 azure site scale mode --mode standard $WebSiteName
-azure site create --location "$DCLocation" --git --slot staging $WebSiteName
+Write-Host "create staging slot for website $WebSiteName"
+New-AzureWebSite -Name $WebSiteName -git -Location $DCLocation -slot staging 
 
 Configure-MessagingBackend $false $config.storageAccountName $dbConStrValue
 Configure-MessagingBackend $true $config.stagingStorageAccountName $stagingDBConStrValue 

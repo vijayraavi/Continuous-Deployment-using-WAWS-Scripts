@@ -2,7 +2,8 @@ param (
     [Parameter(Mandatory = $true)] [String] $DCLocation,
     [Parameter(Mandatory = $true)] [String] $WebSiteName,
     [Parameter(Mandatory = $true)] [String] $BackendURL,
-    [Parameter(Mandatory = $true)] [String] $BackendStagingURL
+    [Parameter(Mandatory = $true)] [String] $BackendStagingURL,
+    [Parameter(Mandatory = $true)] [Boolean] $DeleteExistingWebSite
 )
 
 # Check if Windows Azure Powershell is avaiable
@@ -16,38 +17,42 @@ function Configure-MessagingFrontend {
     [Parameter(Mandatory = $true)] [Boolean] $IsStaging, 
     [Parameter(Mandatory = $true)] [String] $BackendServiceURL
     )
-    $cliSlotOption =$null
-    $slotName =$null
-    if ($IsStaging -eq $true) {
-        $cliSlotOption = "--slot"
-        $slotName = "staging"
-    }
 
-    Write-Host "configuring application settings $WebSiteName $Slot"
     $appSettings = @{
         "MessagesBackendURL" = "$BackendServiceURL"
     }
     
     if ($IsStaging -eq $true) {
-        Set-AzureWebsite -Name $WebSiteName -slot $slotName -AppSettings $appSettings
+        Set-AzureWebsite -Name $WebSiteName -slot staging -AppSettings $appSettings 
+        Write-Host "configuring staging slot for $WebSiteName"
+        azure site scale instances --instances 1 --size small --slot staging $WebSiteName
     }
     else {
         Set-AzureWebsite -Name $WebSiteName -AppSettings $appSettings
+        Write-Host "configuring production slot for $WebSiteName"
+        azure site scale instances --instances 1 --size small $WebSiteName
     }
 }
 
 if ((Get-AzureWebsite | Where-Object {$_.Name -eq $WebSiteName }) -ne $null) {
-    Write-Host "Web Site $WebSiteName already exists and will be deleted"
-    azure site delete -q $WebSiteName
+    if ($DeleteExistingWebSite -eq $true) {
+        Write-Host "Web Site $WebSiteName already exists and will be deleted"
+        Remove-AzureWebsite -Name $WebSiteName -Force
+    }
+    else {
+        Write-Host "Web Site $WebSiteName already exists and will be re-configured"
+    }
 }
 
 # we create the staging site before configure the site 
 # this avoids that the prod settings are copied to the staging site
 Write-Host "create website $WebSiteName"
-azure site create --location "$DCLocation" --git $WebSiteName
+New-AzureWebSite -Name $WebSiteName -git -Location $DCLocation
 Write-Host "set scale mode to standard for $WebSiteName"
 azure site scale mode --mode standard $WebSiteName
-azure site create --location "$DCLocation" --git --slot staging $WebSiteName
+Write-Host "create staging slot for website $WebSiteName"
+New-AzureWebSite -Name $WebSiteName -git -Location $DCLocation -slot staging 
+
 Configure-MessagingFrontend $false $BackendURL
 Configure-MessagingFrontend $true $BackendStagingURL
 
