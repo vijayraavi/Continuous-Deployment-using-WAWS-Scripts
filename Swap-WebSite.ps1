@@ -34,6 +34,9 @@ try{
 		-HttpLoggingEnabled $productionWebSite.HttpLoggingEnabled`
 		-RequestTracingEnabled $productionWebSite.RequestTracingEnabled
 
+	Write-Host "restart staging $WebSiteName"
+	Restart-AzureWebsite -Name $WebSiteName -slot staging
+	
 	Write-Host "swap $WebSiteName"
 	azure site swap --quiet $WebSiteName
 	
